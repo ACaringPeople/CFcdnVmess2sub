@@ -32,7 +32,7 @@ let addressescsv = [
 	//'https://raw.githubusercontent.com/cmliu/WorkerVless2sub/main/addressescsv.csv', //iptest测速结果文件。
 ];
 
-let subconverter = "apiurl.v1.mk"; //在线订阅转换后端，目前使用肥羊的订阅转换功能。支持自建psub 可自行搭建https://github.com/bulianglin/psub
+let subconverter = "url.v1.mk"; //在线订阅转换后端，目前使用肥羊的订阅转换功能。支持自建psub 可自行搭建https://github.com/bulianglin/psub
 let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini"; //订阅配置文件
 let noTLS = 'true'; // false
 let BotToken =''; //可以为空，或者@BotFather中输入/start，/newbot，并关注机器人
@@ -51,7 +51,9 @@ let total = 99;//PB
 //let timestamp = now;
 let timestamp = 4102329600000;//2099-12-31
 const regex = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[.*\]):?(\d+)?#?(.*)?$/;
-
+// 虚假uuid和hostname，用于发送给配置生成服务
+let fakeUserID ;
+let fakeHostName ;
 function utf8ToBase64(str) {
 	return btoa(unescape(encodeURIComponent(str)));
 }
@@ -86,26 +88,45 @@ async function getAddressesapi(api) {
 	}
 
 	let newapi = "";
+
+	// 创建一个AbortController对象，用于控制fetch请求的取消
+	const controller = new AbortController();
+
+	const timeout = setTimeout(() => {
+		controller.abort(); // 取消所有请求
+	}, 2000); // 2秒后触发
+
 	try {
-		const responses = await Promise.allSettled(api.map(apiUrl => fetch(apiUrl,{
-			method: 'get',
+		// 使用Promise.allSettled等待所有API请求完成，无论成功或失败
+		// 对api数组进行遍历，对每个API地址发起fetch请求
+		const responses = await Promise.allSettled(api.map(apiUrl => fetch(apiUrl, {
+			method: 'get', 
 			headers: {
 				'Accept': 'text/html,application/xhtml+xml,application/xml;',
-				'User-Agent': 'cmliu/CFcdnVmess2sub'
-			}
+				'User-Agent': 'cmliu/WorkerVless2sub'
+			},
+			signal: controller.signal // 将AbortController的信号量添加到fetch请求中，以便于需要时可以取消请求
 		}).then(response => response.ok ? response.text() : Promise.reject())));
-			
+
+		// 遍历所有响应
 		for (const response of responses) {
+			// 检查响应状态是否为'fulfilled'，即请求成功完成
 			if (response.status === 'fulfilled') {
+				// 获取响应的内容
 				const content = await response.value;
 				newapi += content + '\n';
 			}
 		}
 	} catch (error) {
 		console.error(error);
+	} finally {
+		// 无论成功或失败，最后都清除设置的超时定时器
+		clearTimeout(timeout);
 	}
+
 	const newAddressesapi = await ADD(newapi);
-	
+
+	// 返回处理后的结果
 	return newAddressesapi;
 }
 
@@ -171,7 +192,7 @@ async function getAddressescsv(tls) {
 }
 
 async function ADD(envadd) {
-	var addtext = envadd.replace(/[	|"'\r\n]+/g, ',').replace(/,+/g, ',');  // 双引号、单引号和换行符替换为逗号
+	var addtext = envadd.replace(/[	|"'\r\n]+/g, ',').replace(/,+/g, ',');	// 双引号、单引号和换行符替换为逗号
 	//console.log(addtext);
 	if (addtext.charAt(0) == ',') addtext = addtext.slice(1);
 	if (addtext.charAt(addtext.length -1) == ',') addtext = addtext.slice(0, addtext.length - 1);
@@ -220,8 +241,8 @@ export default {
 		subconverter = env.SUBAPI || subconverter;
 		subconfig = env.SUBCONFIG || subconfig;
 		FileName = env.SUBNAME || FileName;
-		const userAgentHeader = request.headers.get('User-Agent');
-		const userAgent = userAgentHeader ? userAgentHeader.toLowerCase() : "null";
+		const userAgentHeader = request.headers.get('User-Agent') || "null";
+		const userAgent = userAgentHeader.toLowerCase();
 		const url = new URL(request.url);
 		const format = url.searchParams.get('format') ? url.searchParams.get('format').toLowerCase() : "null";
 		let cc = "";
@@ -233,6 +254,11 @@ export default {
 		let sni = "";
 		let UD = Math.floor(((timestamp - Date.now())/timestamp * 99 * 1099511627776 * 1024)/2);
 		if (env.UA) MamaJustKilledAMan = MamaJustKilledAMan.concat(await ADD(env.UA));
+		const currentDate = new Date();
+		const fakeUserIDMD5 = await MD5MD5(Math.ceil(currentDate.getTime()));
+		fakeUserID = fakeUserIDMD5.slice(0, 8) + "-" + fakeUserIDMD5.slice(8, 12) + "-" + fakeUserIDMD5.slice(12, 16) + "-" + fakeUserIDMD5.slice(16, 20) + "-" + fakeUserIDMD5.slice(20);
+		fakeHostName = fakeUserIDMD5.slice(6, 9) + "." + fakeUserIDMD5.slice(13, 19) + ".xyz";
+		//console.log(`${fakeUserID}\n${fakeHostName}`); // 打印fakeID
 		total = total * 1099511627776 * 1024;
 		let expire= Math.floor(timestamp / 1000) ;
 		
@@ -328,19 +354,19 @@ export default {
 			host = uniqueproxyhosts[Math.floor(Math.random() * uniqueproxyhosts.length)];
 			sni = host;
 
-			await sendMessage("#VMess订阅", request.headers.get('CF-Connecting-IP'), `UA: ${userAgent}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
+			await sendMessage("#VMess订阅", request.headers.get('CF-Connecting-IP'), `UA: ${userAgentHeader}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 		} else {
 			host = url.searchParams.get('host');
 			uuid = url.searchParams.get('uuid');
-			path = url.searchParams.get('path');
-			alterid = url.searchParams.get('alterid');
-			security = url.searchParams.get('security');
+			path = url.searchParams.get('path') || '/?ed=2560';
+			path = (path[0] === '/') ? path : '/' + path;
+			alterid = url.searchParams.get('alterid') || '0';
+			security = url.searchParams.get('security') || 'auto';
 			sni = url.searchParams.get('sni') || host;
-			cc = url.searchParams.get('cc');
-			const pathp = url.pathname.replace(/^\/|\/$/g, "");
-			if(pathp && !url.pathname.includes("/sub")) {
-				const addrPath = url.pathname.replace(/^\/|\/$/g, "");
-				const newUrl = new URL("https://" + addrPath);
+			cc = url.searchParams.get('cc') || '未知';
+			const addrPath = url.pathname.replace(/^\/|\/$/g, "");
+			if(addrPath && !url.pathname.includes("/sub")) {
+				const newUrl = new URL("https://" + addrPath + url.search);
 				return fetch(new Request(newUrl, request));
 			} else if (!url.pathname.includes("/sub")) {
 				const envKey = env.URL302 ? 'URL302' : (env.URL ? 'URL' : null);
@@ -355,6 +381,16 @@ export default {
 						'Content-Type': 'text/html; charset=UTF-8',
 					},
 				});
+			}
+
+			if (cc == '未知'){
+				let ipapiurl = `http://ip-api.com/json/${sni}?lang=zh-CN`;
+				// 发起请求
+				const response = await fetch(ipapiurl);
+				if(response.status == 200) {
+					const ipInfo = await response.json();
+					cc = ipInfo.country + " " + ipInfo.city;
+				}
 			}
 			
 			if (!host || !uuid) {
@@ -380,32 +416,19 @@ export default {
 				headers: { 'content-type': 'text/plain; charset=utf-8' },
 				});
 			}
-			
-			if (!path || path.trim() === '') {
-				path = '/?ed=2048';
-			} else {
-				// 如果第一个字符不是斜杠，则在前面添加一个斜杠
-				path = (path[0] === '/') ? path : '/' + path;
-			}
-
-			if (!alterid || alterid.trim() === '') {
-				alterid = "0";
-			}
-
-			if (!security || security.trim() === '') {
-				security = "auto";
-			}
-
-			if (!cc || cc.trim() === '') {
-				cc = "US";
-			}
 		}
 
 		if (host.toLowerCase().includes('notls') || host.toLowerCase().includes('trycloudflare')) noTLS = 'true';
 		noTLS = env.NOTLS || noTLS;
-		let subconverterUrl = '';
+		let subconverterUrl = generateFakeInfo(url.href, uuid, host);
 
 		if (!userAgent.includes('subconverter') && MamaJustKilledAMan.some(PutAGunAgainstHisHeadPulledMyTriggerNowHesDead => userAgentHeader.toLowerCase().includes(PutAGunAgainstHisHeadPulledMyTriggerNowHesDead)) && MamaJustKilledAMan.length > 0) {
+			const envKey = env.URL302 ? 'URL302' : (env.URL ? 'URL' : null);
+			if (envKey) {
+				const URLs = await ADD(env[envKey]);
+				const URL = URLs[Math.floor(Math.random() * URLs.length)];
+				return envKey === 'URL302' ? Response.redirect(URL, 302) : fetch(new Request(URL, request));
+			}
 			//首页改成一个nginx伪装页
 			return new Response(await nginx(), {
 				headers: {
@@ -413,9 +436,9 @@ export default {
 				},
 			});
 		} else if ( (userAgent.includes('clash') || (format === 'clash' && !userAgent.includes('subconverter')) ) && !userAgent.includes('nekobox') && !userAgent.includes('cf-workers-sub')) {
-			subconverterUrl = `https://${subconverter}/sub?target=clash&url=${encodeURIComponent(request.url)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+			subconverterUrl = `https://${subconverter}/sub?target=clash&url=${encodeURIComponent(subconverterUrl)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 		} else if ( (userAgent.includes('sing-box') || userAgent.includes('singbox') || (format === 'singbox' && !userAgent.includes('subconverter')) ) && !userAgent.includes('cf-workers-sub')){
-			subconverterUrl = `https://${subconverter}/sub?target=singbox&url=${encodeURIComponent(request.url)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+			subconverterUrl = `https://${subconverter}/sub?target=singbox&url=${encodeURIComponent(subconverterUrl)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 		} else {
 			let notlsresponseBody;
 			if(noTLS == 'true'){
@@ -458,22 +481,22 @@ export default {
 					}
 				
 					const vmess = `{
-					"v": "2",
-					"ps": "${addressid}>${cc}",
-					"add": "${address}",
-					"port": "${port}",
-					"id": "${uuid}",
-					"aid": "${alterid}",
-					"scy": "${security}",
-					"net": "ws",
-					"type": "none",
-					"host": "${host}",
-					"path": "${path}",
-					"tls": "",
-					"sni": "",
-					"alpn": "",
-					"fp": ""
-					}`;
+"v": "2",
+"ps": "${addressid}>${cc}",
+"add": "${address}",
+"port": "${port}",
+"id": "${uuid}",
+"aid": "${alterid}",
+"scy": "${security}",
+"net": "ws",
+"type": "none",
+"host": "${host}",
+"path": "${path}",
+"tls": "",
+"sni": "",
+"alpn": "",
+"fp": ""
+}`;
 				
 					const base64Encoded = utf8ToBase64(vmess);
 					const vmessLink = `vmess://${base64Encoded}`;
@@ -522,22 +545,22 @@ export default {
 				}
 			
 				const vmess = `{
-				"v": "2",
-				"ps": "${addressid}>${cc}",
-				"add": "${address}",
-				"port": "${port}",
-				"id": "${uuid}",
-				"aid": "${alterid}",
-				"scy": "${security}",
-				"net": "ws",
-				"type": "none",
-				"host": "${host}",
-				"path": "${path}",
-				"tls": "tls",
-				"sni": "${sni}",
-				"alpn": "",
-				"fp": ""
-				}`;
+"v": "2",
+"ps": "${addressid}>${cc}",
+"add": "${address}",
+"port": "${port}",
+"id": "${uuid}",
+"aid": "${alterid}",
+"scy": "${security}",
+"net": "ws",
+"type": "none",
+"host": "${host}",
+"path": "${path}",
+"tls": "tls",
+"sni": "${sni}",
+"alpn": "",
+"fp": ""
+}`;
 			
 				const base64Encoded = utf8ToBase64(vmess);
 				const vmessLink = `vmess://${base64Encoded}`;
@@ -568,8 +591,8 @@ export default {
 			throw new Error(`Error fetching subconverterUrl: ${subconverterResponse.status} ${subconverterResponse.statusText}`);
 			}
 		
-			const subconverterContent = await subconverterResponse.text();
-		
+			let subconverterContent = await subconverterResponse.text();
+			subconverterContent = revertFakeInfo(subconverterContent, uuid, host);
 			return new Response(subconverterContent, {
 				headers: { 
 					"Content-Disposition": `attachment; filename*=utf-8''${encodeURIComponent(FileName)}; filename=${FileName}`,
@@ -587,3 +610,27 @@ export default {
 
 	}
 };
+
+async function MD5MD5(text) {
+	const encoder = new TextEncoder();
+
+	const firstPass = await crypto.subtle.digest('MD5', encoder.encode(text));
+	const firstPassArray = Array.from(new Uint8Array(firstPass));
+	const firstHex = firstPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+	const secondPass = await crypto.subtle.digest('MD5', encoder.encode(firstHex.slice(7, 27)));
+	const secondPassArray = Array.from(new Uint8Array(secondPass));
+	const secondHex = secondPassArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+	return secondHex.toLowerCase();
+}
+
+function revertFakeInfo(content, userID, hostName) {
+	content = content.replace(new RegExp(fakeUserID, 'g'), userID).replace(new RegExp(fakeHostName, 'g'), hostName);
+	return content;
+}
+
+function generateFakeInfo(content, userID, hostName) {
+	content = content.replace(new RegExp(userID, 'g'), fakeUserID).replace(new RegExp(hostName, 'g'), fakeHostName);
+	return content;
+}
